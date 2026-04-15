@@ -1,0 +1,12 @@
+__pycache__
+*.pyc
+.chainlit
+.claude
+.env
+.env.example
+churn_artifacts.pkl
+agents/
+preprocessing/
+orchestrator.py
+app.py
+state.py
