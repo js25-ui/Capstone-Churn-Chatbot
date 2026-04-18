@@ -8,29 +8,28 @@ client = anthropic.Anthropic()
 
 def retention_strategy(profile: dict, risk_tier: str) -> str:
     """
-    Rule-based retention strategy from notebook Week 7.5 (Cell 89).
-    Exactly reproduces the notebook logic.
+    Rule-based retention strategy from notebook Week 7.5 (Cell 82).
+    Updated to match Capstone_Submission_Ready — no leakage fields.
     """
     if risk_tier == "HIGH":
-        if profile["contract"] == "Month-to-Month":
-            return "Offer a contract upgrade incentive and immediate retention discount."
-        elif profile["satisfaction_score"] <= 2:
-            return "Prioritize customer support outreach and provide a service recovery offer."
-        elif profile["monthly_charge"] > 80:
-            return "Offer a pricing review or loyalty discount to reduce cost sensitivity."
+        contract = profile.get("contract", "Unknown")
+        charge = profile.get("monthly_charge", 0)
+        if contract == "Month-to-Month":
+            return "Offer contract upgrade incentive and immediate retention discount."
+        elif charge > 80:
+            return "Offer pricing review or loyalty discount."
         else:
-            return "Provide proactive outreach with a personalized retention offer."
+            return "Proactive outreach with personalized retention offer."
 
     elif risk_tier == "MEDIUM":
-        if profile["satisfaction_score"] <= 3:
-            return "Send a satisfaction follow-up and offer a targeted service improvement incentive."
-        elif profile["total_services"] <= 3:
-            return "Promote bundled service discounts to increase engagement."
+        contract = profile.get("contract", "Unknown")
+        if contract == "Month-to-Month":
+            return "Send targeted email with contract lock-in discount."
         else:
-            return "Send a targeted loyalty campaign with moderate retention incentives."
+            return "Offer complimentary service upgrade for 3 months."
 
     else:  # LOW
-        return "Maintain engagement through loyalty messaging and regular check-ins."
+        return "Continue standard engagement. Monitor for changes."
 
 
 def solution_agent(state: ChurnState) -> dict:
@@ -46,9 +45,7 @@ def solution_agent(state: ChurnState) -> dict:
     # Build Q&A context
     qa_text = ""
     if questions and answers:
-        qa_lines = []
-        for q, a in zip(questions, answers):
-            qa_lines.append(f"Q: {q}\nA: {a}")
+        qa_lines = [f"Q: {q}\nA: {a}" for q, a in zip(questions, answers)]
         qa_text = "\n".join(qa_lines)
 
     driver_lines = []
@@ -62,10 +59,8 @@ Customer profile:
 - Tenure: {profile['tenure_months']} months
 - Contract: {profile['contract']}
 - Monthly charge: ${profile['monthly_charge']:.2f}
-- Satisfaction: {profile['satisfaction_score']}/5
 - Internet: {profile['internet_type']}
-- Services: {profile['total_services']}
-- CLTV: ${profile['cltv']:.0f}
+- Services: {profile.get('total_services', 'N/A')}
 
 Risk: {risk_data['risk_tier']} ({risk_data['churn_probability']:.1%} churn probability)
 
@@ -77,7 +72,7 @@ Baseline retention strategy: {baseline}
 Customer's responses during diagnosis:
 {qa_text if qa_text else "No diagnosis responses collected."}
 
-Craft a warm, personalized retention message to this customer. Include:
+Craft a warm, personalized retention message. Include:
 1. Acknowledge their specific concerns (from diagnosis answers if available)
 2. A concrete offer aligned with the baseline strategy
 3. Specific dollar amounts or percentages where appropriate
@@ -86,7 +81,7 @@ Craft a warm, personalized retention message to this customer. Include:
 Keep it conversational and under 150 words. Do NOT mention churn risk, SHAP, or ML models."""
 
     response = client.messages.create(
-        model="claude-sonnet-4-5-20250514",
+        model="claude-4-sonnet-20250514",
         max_tokens=400,
         messages=[{"role": "user", "content": prompt}],
     )

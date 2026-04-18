@@ -232,7 +232,7 @@ def agent3_respond(state, user_msg):
                 f"- Do NOT mention churn, SHAP, risk, models, or analytics\n"
                 f"- Under 80 words. End with 'Would you like me to apply this?'\n",
                 f"Account: {profile.get('tenure_months')}mo, {profile.get('contract')}, "
-                f"${profile.get('monthly_charge',0):.2f}/mo, CLTV ${profile.get('cltv',0):.0f}\n"
+                f"${profile.get('monthly_charge',0):.2f}/mo, {profile.get('internet_type','N/A')} internet\n"
                 f"Risk: {risk_data.get('risk_tier')} ({risk_data.get('churn_probability',0):.1%})\n"
                 f"Complaint: {complaint}, Sentiment: {sentiment}/5\n"
                 f"Baseline: {baseline}\n"
@@ -374,21 +374,21 @@ def _call_claude(system, user_msg, max_tokens=400):
 
 
 def _retention_strategy(profile, tier):
+    """Rule-based retention strategy from notebook Cell 82 (no leakage fields)."""
     if tier == "HIGH":
-        if profile.get("contract") == "Month-to-Month":
-            return "Contract upgrade + retention discount"
-        elif profile.get("satisfaction_score", 5) <= 2:
-            return "Priority support + service recovery"
-        elif profile.get("monthly_charge", 0) > 80:
+        contract = profile.get("contract", "Unknown")
+        charge = profile.get("monthly_charge", 0)
+        if contract == "Month-to-Month":
+            return "Contract upgrade incentive + immediate retention discount"
+        elif charge > 80:
             return "Pricing review + loyalty discount"
-        return "Proactive outreach + personalized offer"
+        return "Proactive outreach + personalized retention offer"
     elif tier == "MEDIUM":
-        if profile.get("satisfaction_score", 5) <= 3:
-            return "Satisfaction follow-up + improvement incentive"
-        elif profile.get("total_services", 0) <= 3:
-            return "Bundled service discount"
-        return "Loyalty campaign + moderate incentive"
-    return "Loyalty messaging + check-ins"
+        contract = profile.get("contract", "Unknown")
+        if contract == "Month-to-Month":
+            return "Targeted contract lock-in discount"
+        return "Complimentary service upgrade for 3 months"
+    return "Standard engagement — monitor for changes"
 
 
 def _build_convo(history):

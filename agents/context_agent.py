@@ -15,23 +15,22 @@ def context_agent(state: ChurnState, df_clean) -> dict:
         }
 
     row = match.iloc[0]
+
+    # Build profile from non-leakage fields only
     profile = {
         "customer_id": cid,
         "tenure_months": int(row["Tenure in Months"]),
-        "contract": row["Contract"],
-        "satisfaction_score": int(row["Satisfaction Score"]),
+        "contract": row.get("Contract", "Unknown"),
         "monthly_charge": float(row["Monthly Charge"]),
+        "internet_type": row.get("Internet Type", "Unknown"),
+        "offer": row.get("Offer", "No Offer"),
+        "payment_method": row.get("Payment Method", "Unknown"),
+        "gender": row.get("Gender", "Unknown"),
+        "age": int(row["Age"]) if "Age" in row.index else None,
+        "dependents": int(row.get("Dependents", 0)),
+        "number_of_referrals": int(row.get("Number of Referrals", 0)),
         "total_services": int(row["Total Services"]) if "Total Services" in row.index else None,
-        "payment_method": row["Payment Method"],
-        "cltv": float(row["CLTV"]),
-        "internet_type": row["Internet Type"],
-        "offer": row["Offer"],
-        "total_revenue": float(row["Total Revenue"]),
-        "total_charges": float(row["Total Charges"]),
-        "gender": row["Gender"],
-        "age": int(row["Age"]),
-        "number_of_referrals": int(row["Number of Referrals"]),
-        "dependents": int(row["Dependents"]),
+        "state": row.get("State", "Unknown"),
     }
 
     return {

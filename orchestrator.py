@@ -75,12 +75,11 @@ def node_context(state: ChurnState) -> dict:
         f"| Tenure | {p['tenure_months']} months |\n"
         f"| Contract | {p['contract']} |\n"
         f"| Monthly Charge | ${p['monthly_charge']:.2f} |\n"
-        f"| Satisfaction | {p['satisfaction_score']}/5 |\n"
         f"| Internet Type | {p['internet_type']} |\n"
         f"| Total Services | {p['total_services']} |\n"
         f"| Payment Method | {p['payment_method']} |\n"
-        f"| CLTV | ${p['cltv']:.0f} |\n"
-        f"| Offer | {p['offer']} |\n\n"
+        f"| Offer | {p['offer']} |\n"
+        f"| State | {p.get('state', 'N/A')} |\n\n"
         "Analyzing churn risk..."
     )
     return {

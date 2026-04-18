@@ -17,7 +17,7 @@ def risk_agent(state: ChurnState, df_clean, model, explainer, feature_names) -> 
     # Predict
     churn_prob = float(model.predict_proba(X)[0][1])
 
-    # Risk tier (matches notebook Cell 83)
+    # Risk tier
     if churn_prob >= 0.60:
         tier = "HIGH"
     elif churn_prob >= 0.30:
@@ -25,10 +25,10 @@ def risk_agent(state: ChurnState, df_clean, model, explainer, feature_names) -> 
     else:
         tier = "LOW"
 
-    # SHAP analysis (matches notebook Cell 85)
+    # SHAP analysis — use [1] for binary classifiers (positive class)
     shap_vals = explainer.shap_values(X)
     if isinstance(shap_vals, list):
-        shap_vals = shap_vals[0]
+        shap_vals = shap_vals[1]
     shap_vals = np.array(shap_vals)
     if shap_vals.ndim > 1:
         shap_vals = shap_vals[0]
