@@ -1,20 +1,26 @@
 """
-Conversational AI Churn Mitigation — 3-Agent Pipeline
+Conversational AI Churn Mitigation — 4-Agent Pipeline
 
 Agent 1: Context Extraction (LLM) — sentiment, complaint type, risk signals
 Agent 2: Churn Prediction (ML/XGBoost) — churn probability, risk tier, SHAP drivers
 Agent 3: Strategy Engine (LLM) — every response is generated from full context
+Agent 4: Simulation Agent — counterfactual interventions + A/B validation + contextual re-ranking
 
 NO scripted questions. NO fixed question lists. NO separate "diagnosis mode."
 Every turn: extract context → decide intent → generate a human response.
 """
 
 import os
+import sys
 import json
 import random
+import pickle
 from flask import Flask, request, jsonify
 
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _root not in sys.path:
+    sys.path.insert(0, _root)
+
 _candidates = [
     os.path.join(_root, "customer_data.json"),
     os.path.join(os.getcwd(), "customer_data.json"),
@@ -23,6 +29,42 @@ _data_path = next((p for p in _candidates if os.path.exists(p)), _candidates[0])
 with open(_data_path) as f:
     CUSTOMERS = json.load(f)
 CUSTOMER_LIST = list(CUSTOMERS.values())
+
+# Load model artifacts for Simulation Agent (needs live model for counterfactuals)
+_pkl_candidates = [
+    os.path.join(_root, "churn_artifacts.pkl"),
+    os.path.join(os.getcwd(), "churn_artifacts.pkl"),
+]
+_pkl_path = next((p for p in _pkl_candidates if os.path.exists(p)), None)
+
+SIM_MODEL = None
+SIM_FEATURE_NAMES = None
+SIM_X_TEST = None
+SIM_AB_CACHE = None  # cached A/B results (computed once)
+
+if _pkl_path:
+    try:
+        with open(_pkl_path, "rb") as f:
+            _artifacts = pickle.load(f)
+        SIM_MODEL = _artifacts["model"]
+        SIM_FEATURE_NAMES = _artifacts["feature_names"]
+        # Reconstruct X_test from df_clean for A/B validation
+        from preprocessing.pipeline import preprocess_customer, add_engineered_features
+        _df = _artifacts["df_clean"]
+        if "Total Services" not in _df.columns:
+            _df = add_engineered_features(_df)
+        # Use all customers as the test population for A/B
+        import pandas as pd
+        _rows = []
+        for _, row in _df.iterrows():
+            try:
+                _rows.append(preprocess_customer(row, SIM_FEATURE_NAMES).iloc[0])
+            except Exception:
+                pass
+        if _rows:
+            SIM_X_TEST = pd.DataFrame(_rows)
+    except Exception:
+        pass
 
 app = Flask(__name__)
 
@@ -190,6 +232,9 @@ def agent3_respond(state, user_msg):
         should_offer = True
         offer_reason = "Cancel intent detected"
 
+    # Intervention hint (set by chat() before calling agent3_respond)
+    intervention_hint = state.get("_intervention_hint", "")
+
     # --- Try Claude ---
     try:
         if offers:
@@ -236,6 +281,7 @@ def agent3_respond(state, user_msg):
                 f"Risk: {risk_data.get('risk_tier')} ({risk_data.get('churn_probability',0):.1%})\n"
                 f"Complaint: {complaint}, Sentiment: {sentiment}/5\n"
                 f"Baseline: {baseline}\n"
+                f"{intervention_hint}\n"
                 f"Conversation:\n{convo}\n\nCustomer: \"{user_msg}\"",
             )
             return {"response": response, "action": f"Retention offer ({offer_reason})",
@@ -410,7 +456,7 @@ def _friendly_tenure(months):
 
 
 def _load_customer(state, messages, log, customer, first_name):
-    """Load a customer profile and show account summary."""
+    """Load customer profile, run Phase 1 simulations, show account summary."""
     pr = customer["profile"]
     rd = customer["risk"]
     state.update({
@@ -425,6 +471,49 @@ def _load_customer(state, messages, log, customer, first_name):
         "risk_tier": rd["risk_tier"],
         "top_driver": rd["top_drivers"][0]["feature"] if rd["top_drivers"] else "N/A",
     }})
+
+    # --- AGENT 4: Simulation Phase 1 (statistical ranking) ---
+    sim_phase1 = []
+    if SIM_MODEL and SIM_FEATURE_NAMES:
+        try:
+            from agents.simulation_agent import run_statistical_simulations, run_ab_validation
+            from preprocessing.pipeline import preprocess_customer as _pp
+            _df_clean = _artifacts["df_clean"]
+            if "Total Services" not in _df_clean.columns:
+                _df_clean = add_engineered_features(_df_clean)
+            _match = _df_clean[_df_clean["Customer ID"] == pr["customer_id"]]
+            if not _match.empty:
+                _cust_features = _pp(_match.iloc[0], SIM_FEATURE_NAMES).iloc[0].to_dict()
+                sim_phase1 = run_statistical_simulations(_cust_features, SIM_MODEL, SIM_FEATURE_NAMES)
+
+                # A/B validation (cache it — expensive)
+                global SIM_AB_CACHE
+                if SIM_AB_CACHE is None and SIM_X_TEST is not None:
+                    try:
+                        SIM_AB_CACHE = run_ab_validation(SIM_X_TEST, SIM_MODEL, SIM_FEATURE_NAMES)
+                    except Exception:
+                        SIM_AB_CACHE = {}
+
+                # Attach A/B results to each intervention
+                if SIM_AB_CACHE:
+                    for item in sim_phase1:
+                        ab = SIM_AB_CACHE.get(item["name"], {})
+                        item["p_value"] = ab.get("p_value")
+                        item["significant"] = ab.get("significant", False)
+
+                log.append({"agent": "Agent 4: Simulation", "output": {
+                    "phase": 1,
+                    "interventions": len(sim_phase1),
+                    "top": sim_phase1[0]["name"] if sim_phase1 else "N/A",
+                    "top_reduction": sim_phase1[0].get("reduction_pct", 0) if sim_phase1 else 0,
+                }})
+        except Exception as e:
+            log.append({"agent": "Agent 4: Simulation", "output": {"phase": 1, "error": str(e)[:100]}})
+
+    state["simulation_phase1"] = sim_phase1
+    state["simulation_phase2"] = None
+    state["best_intervention"] = sim_phase1[0]["name"] if sim_phase1 else None
+
     t = _friendly_tenure(pr["tenure_months"])
     if first_name and first_name != "there":
         intro = f"Great to meet you, {first_name}! I've pulled up your account."
@@ -455,6 +544,8 @@ def start():
         "offers_made": [], "solutions_attempted": 0,
         "sentiment_history": [], "escalated": False,
         "escalation_summary": None, "phase": "greeting",
+        "simulation_phase1": [], "simulation_phase2": None,
+        "best_intervention": None,
         "pipeline_log": [],
     }
     return jsonify({"state": state, "messages": [{"role": "assistant", "content": (
@@ -595,6 +686,41 @@ def chat():
     state["conversation_history"] = state.get("conversation_history", []) + [
         {"customer": user_msg, "agent": None}
     ]
+
+    # AGENT 4: Simulation Phase 2 (contextual re-ranking before offer)
+    # Run Phase 2 if we have Phase 1 results and enough conversation context
+    if (state.get("simulation_phase1") and not state.get("simulation_phase2")
+            and len(state.get("conversation_history", [])) >= 2):
+        try:
+            from agents.simulation_agent import run_contextual_reranking
+            customer_msgs = [t["customer"] for t in state.get("conversation_history", []) if t.get("customer")]
+            phase2 = run_contextual_reranking(
+                state["simulation_phase1"], customer_msgs, _call_claude
+            )
+            state["simulation_phase2"] = phase2
+            state["best_intervention"] = phase2[0]["name"] if phase2 else state.get("best_intervention")
+            log.append({"agent": "Agent 4: Simulation", "output": {
+                "phase": 2,
+                "best": phase2[0]["name"] if phase2 else "N/A",
+                "combined_score": phase2[0].get("combined_score", 0) if phase2 else 0,
+            }})
+        except Exception as e:
+            log.append({"agent": "Agent 4: Simulation", "output": {"phase": 2, "error": str(e)[:100]}})
+
+    # Build intervention hint for Agent 3
+    best_int = state.get("best_intervention", "")
+    hint = ""
+    if best_int:
+        sim_data = state.get("simulation_phase2") or state.get("simulation_phase1") or []
+        for s in sim_data:
+            if s["name"] == best_int and s.get("eligible"):
+                hint = (
+                    f"\nRECOMMENDED INTERVENTION (from simulation): {s['name']} — {s['description']}. "
+                    f"Projected churn reduction: {s.get('reduction_pct', 0):.1f}%. "
+                    f"Build your offer around this intervention."
+                )
+                break
+    state["_intervention_hint"] = hint
 
     # AGENT 3: Generate response (it decides whether to offer or keep talking)
     result = agent3_respond(state, user_msg)

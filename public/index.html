@@ -456,6 +456,7 @@
         { label: 'Structured Features', done: !!state.last_context, icon: '→' },
         { label: 'Agent 2: Churn Prediction', done: !!state.risk_data, icon: 'ML' },
         { label: 'SHAP Explainability', done: !!state.risk_data, icon: '→' },
+        { label: 'Agent 4: Simulation', done: (state.simulation_phase1 || []).length > 0, icon: 'ML', active: !!state.simulation_phase2 },
         { label: 'Agent 3: Strategy Engine', done: state.solutions_attempted > 0, icon: 'LLM', active: state.phase === 'solution' || state.phase === 'conversation' },
         { label: 'Dashboard Output', done: state.solutions_attempted > 0, icon: '📊' },
       ];
@@ -572,6 +573,62 @@
         html += '</div>';
       }
       html += '</div>';
+
+      // ---- AGENT 4: SIMULATION ----
+      const sim1 = state.simulation_phase1 || [];
+      const sim2 = state.simulation_phase2;
+      if (sim1.length > 0) {
+        html += '<div class="panel-section" style="border-color:#a855f755;">';
+        html += '<h3><span class="agent-icon" style="background:rgba(168,85,247,0.2);color:#a855f7;">4</span> SIMULATION AGENT <span style="font-size:9px;background:#a855f733;color:#a855f7;padding:1px 6px;border-radius:8px;margin-left:4px;">ML</span></h3>';
+
+        const simData = sim2 || sim1;
+        const isPhase2 = !!sim2;
+        html += `<div style="font-size:10px;color:var(--panel-muted);margin-bottom:6px;font-weight:600;">${isPhase2 ? 'POST-DIAGNOSIS RANKING (statistical + contextual)' : 'PRE-CONVERSATION RANKING (statistical only)'}</div>`;
+
+        // Table header
+        html += '<table style="width:100%;border-collapse:collapse;font-size:10px;margin-bottom:6px;">';
+        html += '<tr style="border-bottom:1px solid var(--panel-border);">';
+        html += '<th style="text-align:left;padding:3px 4px;color:var(--panel-muted);">Intervention</th>';
+        html += '<th style="text-align:right;padding:3px 4px;color:var(--panel-muted);">Current</th>';
+        html += '<th style="text-align:right;padding:3px 4px;color:var(--panel-muted);">Simulated</th>';
+        html += '<th style="text-align:right;padding:3px 4px;color:var(--panel-muted);">↓ %</th>';
+        if (isPhase2) {
+          html += '<th style="text-align:right;padding:3px 4px;color:var(--panel-muted);">Fit</th>';
+          html += '<th style="text-align:right;padding:3px 4px;color:var(--panel-muted);">Score</th>';
+        }
+        html += '<th style="text-align:center;padding:3px 4px;color:var(--panel-muted);">Sig?</th>';
+        html += '</tr>';
+
+        for (let i = 0; i < simData.length; i++) {
+          const s = simData[i];
+          const isTop = i === 0 && s.eligible;
+          const bg = isTop ? 'rgba(34,197,94,0.08)' : 'transparent';
+          const opacity = s.eligible ? '1' : '0.4';
+          html += `<tr style="border-bottom:1px solid var(--panel-border);background:${bg};opacity:${opacity};">`;
+          html += `<td style="padding:3px 4px;font-weight:${isTop ? '700' : '400'};color:${isTop ? 'var(--low)' : 'var(--panel-text)'};">${isTop ? '→ ' : ''}${s.name}</td>`;
+          html += `<td style="text-align:right;padding:3px 4px;">${s.current_prob != null ? (s.current_prob*100).toFixed(1)+'%' : '—'}</td>`;
+          html += `<td style="text-align:right;padding:3px 4px;">${s.simulated_prob != null ? (s.simulated_prob*100).toFixed(1)+'%' : '—'}</td>`;
+          html += `<td style="text-align:right;padding:3px 4px;color:${s.reduction_pct > 0 ? 'var(--low)' : 'var(--panel-muted)'};">${s.reduction_pct ? s.reduction_pct.toFixed(1)+'%' : '—'}</td>`;
+          if (isPhase2) {
+            html += `<td style="text-align:right;padding:3px 4px;">${s.contextual_fit != null ? s.contextual_fit.toFixed(0) : '—'}</td>`;
+            html += `<td style="text-align:right;padding:3px 4px;font-weight:600;color:#a855f7;">${s.combined_score != null ? s.combined_score.toFixed(1) : '—'}</td>`;
+          }
+          html += `<td style="text-align:center;padding:3px 4px;">${s.significant === true ? '✓' : s.significant === false ? '—' : ''}</td>`;
+          html += '</tr>';
+        }
+        html += '</table>';
+
+        if (state.best_intervention) {
+          const best = simData.find(s => s.name === state.best_intervention && s.eligible);
+          if (best) {
+            html += `<div style="padding:6px 8px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);border-radius:6px;font-size:11px;">`;
+            html += `<strong style="color:var(--low);">Best offer: ${best.name}</strong>`;
+            html += `<div style="color:var(--panel-muted);font-size:10px;margin-top:2px;">${best.description} — ${best.reduction_pct?.toFixed(1) || '?'}% projected churn reduction</div>`;
+            html += '</div>';
+          }
+        }
+        html += '</div>';
+      }
 
       // ---- PIPELINE LOG ----
       const plog = state.pipeline_log || [];
