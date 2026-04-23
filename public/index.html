@@ -577,10 +577,9 @@
       // ---- AGENT 4: SIMULATION ----
       const sim1 = state.simulation_phase1 || [];
       const sim2 = state.simulation_phase2;
+      html += '<div class="panel-section" style="border-color:#a855f755;">';
+      html += '<h3><span class="agent-icon" style="background:rgba(168,85,247,0.2);color:#a855f7;">4</span> SIMULATION AGENT <span style="font-size:9px;background:#a855f733;color:#a855f7;padding:1px 6px;border-radius:8px;margin-left:4px;">ML</span></h3>';
       if (sim1.length > 0) {
-        html += '<div class="panel-section" style="border-color:#a855f755;">';
-        html += '<h3><span class="agent-icon" style="background:rgba(168,85,247,0.2);color:#a855f7;">4</span> SIMULATION AGENT <span style="font-size:9px;background:#a855f733;color:#a855f7;padding:1px 6px;border-radius:8px;margin-left:4px;">ML</span></h3>';
-
         const simData = sim2 || sim1;
         const isPhase2 = !!sim2;
         html += `<div style="font-size:10px;color:var(--panel-muted);margin-bottom:6px;font-weight:600;">${isPhase2 ? 'POST-DIAGNOSIS RANKING (statistical + contextual)' : 'PRE-CONVERSATION RANKING (statistical only)'}</div>`;
@@ -627,8 +626,10 @@
             html += '</div>';
           }
         }
-        html += '</div>';
+      } else {
+        html += '<div class="empty-state">Awaiting customer identification...</div>';
       }
+      html += '</div>';
 
       // ---- PIPELINE LOG ----
       const plog = state.pipeline_log || [];
