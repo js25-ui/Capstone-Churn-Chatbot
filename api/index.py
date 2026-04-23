@@ -472,43 +472,15 @@ def _load_customer(state, messages, log, customer, first_name):
         "top_driver": rd["top_drivers"][0]["feature"] if rd["top_drivers"] else "N/A",
     }})
 
-    # --- AGENT 4: Simulation Phase 1 (statistical ranking) ---
-    sim_phase1 = []
-    if SIM_MODEL and SIM_FEATURE_NAMES:
-        try:
-            from agents.simulation_agent import run_statistical_simulations, run_ab_validation
-            from preprocessing.pipeline import preprocess_customer as _pp
-            _df_clean = _artifacts["df_clean"]
-            if "Total Services" not in _df_clean.columns:
-                _df_clean = add_engineered_features(_df_clean)
-            _match = _df_clean[_df_clean["Customer ID"] == pr["customer_id"]]
-            if not _match.empty:
-                _cust_features = _pp(_match.iloc[0], SIM_FEATURE_NAMES).iloc[0].to_dict()
-                sim_phase1 = run_statistical_simulations(_cust_features, SIM_MODEL, SIM_FEATURE_NAMES)
-
-                # A/B validation (cache it — expensive)
-                global SIM_AB_CACHE
-                if SIM_AB_CACHE is None and SIM_X_TEST is not None:
-                    try:
-                        SIM_AB_CACHE = run_ab_validation(SIM_X_TEST, SIM_MODEL, SIM_FEATURE_NAMES)
-                    except Exception:
-                        SIM_AB_CACHE = {}
-
-                # Attach A/B results to each intervention
-                if SIM_AB_CACHE:
-                    for item in sim_phase1:
-                        ab = SIM_AB_CACHE.get(item["name"], {})
-                        item["p_value"] = ab.get("p_value")
-                        item["significant"] = ab.get("significant", False)
-
-                log.append({"agent": "Agent 4: Simulation", "output": {
-                    "phase": 1,
-                    "interventions": len(sim_phase1),
-                    "top": sim_phase1[0]["name"] if sim_phase1 else "N/A",
-                    "top_reduction": sim_phase1[0].get("reduction_pct", 0) if sim_phase1 else 0,
-                }})
-        except Exception as e:
-            log.append({"agent": "Agent 4: Simulation", "output": {"phase": 1, "error": str(e)[:100]}})
+    # --- AGENT 4: Simulation Phase 1 (pre-computed in customer_data.json) ---
+    sim_phase1 = customer.get("simulations", [])
+    if sim_phase1:
+        log.append({"agent": "Agent 4: Simulation", "output": {
+            "phase": 1,
+            "interventions": len(sim_phase1),
+            "top": sim_phase1[0]["name"] if sim_phase1 else "N/A",
+            "top_reduction": sim_phase1[0].get("reduction_pct", 0) if sim_phase1 else 0,
+        }})
 
     state["simulation_phase1"] = sim_phase1
     state["simulation_phase2"] = None
