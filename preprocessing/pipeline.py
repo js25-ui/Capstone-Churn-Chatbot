@@ -1,50 +1,39 @@
 """
-Preprocessing pipeline extracted from Capstone_Submission_Ready notebook.
-Reproduces the exact feature engineering and encoding used during training.
+Preprocessing pipeline — matches the trained model in churn_artifacts.pkl.
 
-Key changes from original notebook:
-- Leakage columns (Satisfaction Score, CLTV, Total Charges, Total Revenue, etc.) removed
-- Tenure Group dropped from model (used for viz only)
-- State kept for geographic signal
-- Service columns use explicit Yes/No → 1/0 mapping
-- Only engineered features: Total Services, Charge Per Service
+The pickle contains a model trained with 56 features from the original
+Merged_Capstone_Code notebook. This pipeline reproduces that exact
+feature engineering and encoding so predictions match.
+
+Note: The Capstone_Submission_Ready notebook removes leakage columns
+and produces a different model. When a new pickle is exported from that
+notebook, update this pipeline accordingly.
 """
 
 import pandas as pd
 import numpy as np
 
 
-# Leakage columns removed during data cleaning (Cell 14)
-LEAKAGE_COLUMNS = [
-    "Churn Category",
-    "Churn Reason",
-    "Churn Score",
-    "Churn Label",
-    "Customer Status",
-    "Satisfaction Score",
-    "Total Charges",
-    "Total Revenue",
-    "Total Refunds",
-    "Total Long Distance Charges",
-    "Total Extra Data Charges",
-    "CLTV",
-]
-
-# Columns dropped before modeling (Cell 32)
+# Columns dropped before modeling (from the notebook that produced the pickle)
 COLUMNS_TO_DROP = [
     "Customer ID",
     "Zip Code",
     "Lat Long",
     "City",
+    "State",
     "Country",
     "Latitude",
     "Longitude",
-    "Tenure Group",  # dropped from model — tree handles continuous tenure
     "Quarter",
     "Churn",
+    # Leakage columns already dropped during data cleaning:
+    "Churn Category",
+    "Churn Reason",
+    "Churn Score",
+    "Customer Status",
 ]
 
-# Service columns for Total Services count (Cell 26)
+# Service columns used for Total Services (Cell 26 of both notebooks)
 SERVICE_COLS = [
     "Phone Service",
     "Multiple Lines",
@@ -59,10 +48,13 @@ SERVICE_COLS = [
 
 
 def add_engineered_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Reproduce feature engineering from Cell 26."""
+    """
+    Reproduce feature engineering from the training notebook.
+    Matches the 56-feature model in churn_artifacts.pkl.
+    """
     df = df.copy()
 
-    # Tenure Groups (kept in df_clean for viz, dropped before modeling)
+    # Tenure Groups
     if "Tenure Group" not in df.columns:
         df["Tenure Group"] = pd.cut(
             df["Tenure in Months"],
@@ -70,18 +62,23 @@ def add_engineered_features(df: pd.DataFrame) -> pd.DataFrame:
             labels=["0-1 yr", "1-2 yr", "2-3 yr", "3-4 yr", "4-5 yr", "5-6 yr"],
         )
 
-    # Total Services — explicit Yes/No mapping (Cell 26)
+    # Total Services — sum of binary service columns
     if "Total Services" not in df.columns:
-        total = 0
-        for col in SERVICE_COLS:
-            if col in df.columns:
-                if df[col].dtype == object:
-                    total = total + (df[col] == "Yes").astype(int)
-                else:
-                    total = total + df[col]
-        df["Total Services"] = total
+        df["Total Services"] = df[SERVICE_COLS].sum(axis=1)
 
-    # Charge Per Service (Cell 26)
+    # Revenue Per Month
+    if "Revenue Per Month" not in df.columns and "Total Revenue" in df.columns:
+        df["Revenue Per Month"] = df["Total Revenue"] / (df["Tenure in Months"] + 1)
+
+    # Charge Per Tenure Month
+    if "Charge Per Tenure Month" not in df.columns and "Total Charges" in df.columns:
+        df["Charge Per Tenure Month"] = df["Total Charges"] / (df["Tenure in Months"] + 1)
+
+    # Revenue Efficiency
+    if "Revenue Efficiency" not in df.columns and "Total Revenue" in df.columns:
+        df["Revenue Efficiency"] = df["Total Revenue"] / (df["Tenure in Months"] + 1)
+
+    # Charge Per Service
     if "Charge Per Service" not in df.columns:
         df["Charge Per Service"] = df["Monthly Charge"] / (df["Total Services"] + 1)
 
@@ -95,18 +92,17 @@ def preprocess_customer(customer_row: pd.Series, feature_names: list) -> pd.Data
     """
     df = pd.DataFrame([customer_row])
 
-    # Feature engineering
+    # Feature engineering (if not already present)
     df = add_engineered_features(df)
 
-    # Drop non-modeling columns (leakage + non-predictive)
-    all_drops = LEAKAGE_COLUMNS + COLUMNS_TO_DROP
-    cols_to_drop = [c for c in all_drops if c in df.columns]
+    # Drop non-modeling columns
+    cols_to_drop = [c for c in COLUMNS_TO_DROP if c in df.columns]
     df = df.drop(columns=cols_to_drop)
 
-    # One-hot encode categoricals (Cell 34: get_dummies with drop_first=True)
+    # One-hot encode categoricals (get_dummies with drop_first=True)
     cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
     if cat_cols:
-        df = pd.get_dummies(df, columns=cat_cols, drop_first=True, dtype=int)
+        df = pd.get_dummies(df, columns=cat_cols, drop_first=True)
 
     # Reindex to match training feature set exactly
     df = df.reindex(columns=feature_names, fill_value=0)

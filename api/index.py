@@ -420,21 +420,24 @@ def _call_claude(system, user_msg, max_tokens=400):
 
 
 def _retention_strategy(profile, tier):
-    """Rule-based retention strategy from notebook Cell 82 (no leakage fields)."""
+    """Exact retention_strategy from notebook Cell 82."""
     if tier == "HIGH":
         contract = profile.get("contract", "Unknown")
         charge = profile.get("monthly_charge", 0)
         if contract == "Month-to-Month":
-            return "Contract upgrade incentive + immediate retention discount"
+            return "Offer contract upgrade incentive and immediate retention discount."
         elif charge > 80:
-            return "Pricing review + loyalty discount"
-        return "Proactive outreach + personalized retention offer"
+            return "Offer pricing review or loyalty discount."
+        else:
+            return "Proactive outreach with personalized retention offer."
     elif tier == "MEDIUM":
         contract = profile.get("contract", "Unknown")
         if contract == "Month-to-Month":
-            return "Targeted contract lock-in discount"
-        return "Complimentary service upgrade for 3 months"
-    return "Standard engagement — monitor for changes"
+            return "Send targeted email with contract lock-in discount."
+        else:
+            return "Offer complimentary service upgrade for 3 months."
+    else:
+        return "Continue standard engagement. Monitor for changes."
 
 
 def _build_convo(history):

@@ -538,7 +538,8 @@
           ['ID', p.customer_id], ['Tenure', p.tenure_months+'mo'],
           ['Contract', p.contract], ['Charge', '$'+p.monthly_charge.toFixed(2)],
           ['Internet', p.internet_type], ['Services', p.total_services],
-          ['State', p.state || 'N/A'], ['Offer', p.offer || 'N/A'],
+          ['Satisfaction', (p.satisfaction_score || 'N/A') + '/5'],
+          ['CLTV', p.cltv ? '$'+p.cltv.toLocaleString() : 'N/A'],
         ];
         html += '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;">';
         for (const [l, v] of feats) {
