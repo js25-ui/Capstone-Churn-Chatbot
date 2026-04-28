@@ -450,6 +450,51 @@ def _build_convo(history):
     )
 
 
+def _intervention_fallback(int_name, addr, pr):
+    """Generate a fallback offer for a specific intervention type."""
+    low = int_name.lower()
+    if "contract" in low:
+        return (
+            f"How about this{addr} — I can switch you to an **annual plan** "
+            f"and lock in a **20% lower rate** for the full year. No surprise increases. "
+            f"Would you like me to set that up?"
+        )
+    if "autopay" in low:
+        return (
+            f"Here's a different idea{addr} — switch to **credit card autopay** "
+            f"and I'll give you a **$10/month discount** plus a **$20 account credit** "
+            f"right now. No plan changes needed. Interested?"
+        )
+    if "security" in low:
+        return (
+            f"Let me try something else{addr} — I can add **Online Security** "
+            f"to your account **free for 6 months** (normally $10/month). "
+            f"It protects all your devices. Would you like that?"
+        )
+    if "bundling" in low or "service" in low:
+        return (
+            f"What about this{addr} — I can bundle in **2 extra services** at a "
+            f"**discounted rate** that usually saves 15-20% overall. "
+            f"Want me to show you the options?"
+        )
+    if "referral" in low:
+        return (
+            f"Here's one more option{addr} — join our **Referral Rewards** program "
+            f"and earn **$25 credit** for every friend who signs up. "
+            f"Plus I'll add **$15 to your account** today. Sound good?"
+        )
+    if "tenure" in low:
+        return (
+            f"How about a **rate lock**{addr}? I'll guarantee your current rate of "
+            f"**${pr.get('monthly_charge', 0):.2f}/month** for 24 months — "
+            f"no increases no matter what. Would that work?"
+        )
+    return (
+        f"Let me try one more thing{addr} — a **$25 account credit** "
+        f"plus a **free service upgrade** for 3 months. Would you like that?"
+    )
+
+
 def _friendly_tenure(months):
     if months < 12:
         return f"{months} months"
@@ -521,7 +566,7 @@ def start():
         "sentiment_history": [], "escalated": False,
         "escalation_summary": None, "phase": "greeting",
         "simulation_phase1": [], "simulation_phase2": None,
-        "best_intervention": None,
+        "best_intervention": None, "interventions_offered": [],
         "pipeline_log": [],
     }
     return jsonify({"state": state, "messages": [{"role": "assistant", "content": (
@@ -706,110 +751,100 @@ def chat():
     if result.get("offer_made"):
         state["offers_made"] = state.get("offers_made", []) + [response]
         state["solutions_attempted"] = state.get("solutions_attempted", 0) + 1
+        # Track which intervention was offered
+        best = state.get("best_intervention")
+        if best:
+            offered = set(state.get("interventions_offered", []))
+            offered.add(best)
+            state["interventions_offered"] = list(offered)
 
-    # Handle rejection → use NEXT-BEST intervention from Simulation Agent
-    if result.get("is_rejection") and state.get("solutions_attempted", 0) < 2:
+    # Handle rejection → walk down the simulation ranking
+    # Only offer interventions that are: eligible, significant, AND reduce churn (> 0%)
+    if result.get("is_rejection"):
         state["solutions_attempted"] = state.get("solutions_attempted", 0) + 1
         pr = state.get("customer_profile", {})
         name_r = state.get("customer_name", "there")
         addr_r = f", {name_r}" if name_r != "there" else ""
+        already_offered = set(state.get("interventions_offered", []))
 
-        # Find the next eligible intervention (skip the one already offered)
+        # Find the next VALID intervention (eligible + significant + reduces churn)
         sim_data = state.get("simulation_phase2") or state.get("simulation_phase1") or []
-        first_offered = state.get("best_intervention", "")
         next_intervention = None
         for s in sim_data:
-            if s.get("eligible") and s["name"] != first_offered:
+            if (s.get("eligible")
+                    and s["name"] not in already_offered
+                    and s.get("significant", False)
+                    and s.get("reduction_pct", 0) > 0):
                 next_intervention = s
                 break
 
         if next_intervention:
-            # Build offer from the next-best simulation intervention
             int_name = next_intervention["name"]
             int_desc = next_intervention["description"]
             int_reduction = next_intervention.get("reduction_pct", 0)
             state["best_intervention"] = int_name
+            already_offered.add(int_name)
+            state["interventions_offered"] = list(already_offered)
 
+            offer_num = len(already_offered)
             try:
                 convo_r = _build_convo(state.get("conversation_history", []))
+                prev_offers = "\n".join(f"- {o[:100]}" for o in state.get("offers_made", []))
                 response = _call_claude(
-                    f"You are a customer service agent. The customer rejected your first offer. "
-                    f"Now offer a DIFFERENT solution based on this specific intervention:\n"
+                    f"You are a customer service agent. The customer has rejected "
+                    f"{offer_num - 1} previous offer(s). Try a COMPLETELY DIFFERENT approach "
+                    f"based on this intervention:\n"
                     f"Intervention: {int_name} — {int_desc}\n"
-                    f"Projected impact: {int_reduction:.1f}% churn reduction\n\n"
+                    f"Projected impact: {int_reduction:.1f}% improvement\n\n"
                     f"RULES:\n"
-                    f"- Acknowledge they didn't like the first offer\n"
-                    f"- Present this intervention as a concrete offer\n"
-                    f"- For 'Autopay Migration': offer to switch payment method + small credit\n"
-                    f"- For 'Online Security': offer free online security add-on\n"
-                    f"- For 'Service Bundling': offer discounted bundle deal\n"
-                    f"- For 'Referral Program': offer referral bonus + credit for each referral\n"
-                    f"- For 'Tenure Survival': offer loyalty lock-in with guaranteed rate\n"
-                    f"- Do NOT mention churn, SHAP, simulations, or analytics\n"
+                    f"- Briefly acknowledge they haven't found the right fit yet\n"
+                    f"- Present this as a fresh, different kind of offer\n"
+                    f"- For 'Contract Upgrade': annual plan lock-in with savings\n"
+                    f"- For 'Autopay Migration': switch payment method + credit\n"
+                    f"- For 'Online Security': free security add-on trial\n"
+                    f"- For 'Service Bundling': discounted bundle deal\n"
+                    f"- For 'Referral Program': referral bonus + signup credit\n"
+                    f"- For 'Tenure Survival': rate lock guarantee\n"
+                    f"- Do NOT repeat any previous offers\n"
+                    f"- Do NOT mention churn, SHAP, simulations, analytics\n"
                     f"- Under 80 words\n",
                     f"Customer: {pr.get('contract')}, ${pr.get('monthly_charge',0):.2f}/mo\n"
-                    f"Rejected offer: {state.get('offers_made', [''])[- 1][:150]}\n"
-                    f"Customer said: \"{user_msg}\"\n"
-                    f"Conversation:\n{convo_r}",
+                    f"Previous offers (all rejected):\n{prev_offers}\n"
+                    f"Customer said: \"{user_msg}\"\nConversation:\n{convo_r}",
                 )
             except Exception:
-                # Keyword fallback for each intervention type
-                int_lower = int_name.lower()
-                if "autopay" in int_lower:
-                    response = (
-                        f"I hear you{addr_r}. How about this instead — if you switch to "
-                        f"**credit card autopay**, I can give you a **$10/month discount** "
-                        f"plus a **$20 account credit** right now. No contract change needed. "
-                        f"Would you like me to set that up?"
-                    )
-                elif "security" in int_lower:
-                    response = (
-                        f"Understood{addr_r}. Let me try something different — I can add "
-                        f"**Online Security** to your account **free for 6 months** "
-                        f"(normally $10/month). It protects your devices and data. "
-                        f"Would you like me to add that?"
-                    )
-                elif "bundling" in int_lower or "service" in int_lower:
-                    response = (
-                        f"No problem{addr_r}. What if we bundled in an extra service? "
-                        f"I can add **2 additional services** at a **discounted bundle rate** "
-                        f"— that usually saves customers 15-20% overall. Interested?"
-                    )
-                elif "referral" in int_lower:
-                    response = (
-                        f"Fair enough{addr_r}. Here's another option — join our "
-                        f"**Referral Rewards program** and earn a **$25 credit** for each "
-                        f"friend you refer. Plus I'll add a **$15 credit** to your account "
-                        f"right now just for signing up. Sound good?"
-                    )
-                elif "tenure" in int_lower:
-                    response = (
-                        f"I understand{addr_r}. How about a **rate lock guarantee**? "
-                        f"I'll freeze your current rate at **${pr.get('monthly_charge',0):.2f}/month** "
-                        f"for 24 months — no increases, guaranteed. Would that work?"
-                    )
-                else:
-                    response = (
-                        f"I understand{addr_r}. Let me offer something completely different — "
-                        f"a **$25 account credit** plus a **free service upgrade** for 3 months. "
-                        f"Would you like me to apply that?"
-                    )
+                response = _intervention_fallback(int_name, addr_r, pr)
 
             log.append({"agent": "Agent 4: Simulation", "output": {
-                "action": f"Rejected '{first_offered}' → offering '{int_name}' "
-                          f"({int_reduction:.1f}% reduction)"}})
+                "action": f"Offer {offer_num}: '{int_name}' ({int_reduction:.1f}% reduction)",
+                "remaining": sum(1 for s in sim_data
+                                 if s.get("eligible") and s["name"] not in already_offered
+                                 and s.get("significant", False) and s.get("reduction_pct", 0) > 0),
+            }})
         else:
-            # No more eligible interventions — generic fallback
+            # All valid interventions exhausted → escalate to human agent
+            state["escalated"] = True
+            state["phase"] = "escalated"
+            n_tried = len(already_offered)
             response = (
-                f"I understand{addr_r}. Let me check with my team to see what "
-                f"other options we have available. Is there a specific type of "
-                f"offer that would interest you — a discount, a service upgrade, or something else?"
+                f"I appreciate your patience{addr_r}. I've offered you everything I have "
+                f"available on my end ({n_tried} different options), and I understand none of them "
+                f"were quite right.\n\n"
+                f"Let me connect you with a **senior retention specialist** who has access to "
+                f"additional programs and more flexibility. They'll have the full context of our "
+                f"conversation so you won't need to repeat anything.\n\n"
+                f"Is there anything you'd like me to flag for them before I transfer you?"
             )
+            log.append({"agent": "Escalation", "output": {
+                "reason": f"All {n_tried} valid interventions rejected",
+                "interventions_tried": list(already_offered),
+            }})
 
         state["offers_made"] = state.get("offers_made", []) + [response]
         state["conversation_history"][-1]["agent"] = response
-        result = {"response": response, "action": f"Second offer: {next_intervention['name'] if next_intervention else 'generic'}",
-                  "offer_made": True}
+        result = {"response": response,
+                  "action": f"Offer: {next_intervention['name'] if next_intervention else 'ESCALATE'}",
+                  "offer_made": next_intervention is not None}
 
     log.append({"agent": "Agent 3: Strategy Engine", "output": {
         "action": result.get("action", ""), "offer_made": result.get("offer_made", False)}})
