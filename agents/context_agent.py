@@ -9,38 +9,27 @@ def context_agent(state: ChurnState, df_clean) -> dict:
     match = df_clean[df_clean["Customer ID"] == cid]
 
     if match.empty:
-        return {
-            "customer_profile": None,
-            "phase": "identify",
-        }
+        return {"customer_profile": None, "phase": "identify"}
 
     row = match.iloc[0]
 
-    # Build profile from all available fields in df_clean
-    def _get(col, default=None):
+    def _g(col, default=None):
         return row[col] if col in row.index else default
 
+    # Only pre-outcome features — no leakage columns
     profile = {
         "customer_id": cid,
         "tenure_months": int(row["Tenure in Months"]),
-        "contract": _get("Contract", "Unknown"),
+        "contract": _g("Contract", "Unknown"),
         "monthly_charge": float(row["Monthly Charge"]),
-        "total_charges": float(_get("Total Charges", 0)),
-        "total_revenue": float(_get("Total Revenue", 0)),
-        "satisfaction_score": int(_get("Satisfaction Score", 0)) if _get("Satisfaction Score") is not None else None,
-        "cltv": float(_get("CLTV", 0)),
-        "internet_type": _get("Internet Type", "Unknown"),
-        "offer": _get("Offer", "No Offer"),
-        "payment_method": _get("Payment Method", "Unknown"),
-        "gender": _get("Gender", "Unknown"),
+        "internet_type": _g("Internet Type", "Unknown"),
+        "offer": _g("Offer", "No Offer"),
+        "payment_method": _g("Payment Method", "Unknown"),
+        "gender": _g("Gender", "Unknown"),
         "age": int(row["Age"]) if "Age" in row.index else None,
-        "dependents": int(_get("Dependents", 0)),
-        "number_of_referrals": int(_get("Number of Referrals", 0)),
-        "total_services": int(_get("Total Services", 0)),
-        "state": _get("State", "Unknown"),
+        "dependents": int(_g("Dependents", 0)),
+        "number_of_referrals": int(_g("Number of Referrals", 0)),
+        "total_services": int(_g("Total Services", 0)),
     }
 
-    return {
-        "customer_profile": profile,
-        "phase": "risk",
-    }
+    return {"customer_profile": profile, "phase": "risk"}

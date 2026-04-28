@@ -1,9 +1,6 @@
 """
 Solution Agent — retention strategy + message generation.
-
-retention_strategy(): Exact code from notebook Cell 82.
-generate_retention_message(): Exact template fallback from notebook Cell 84.
-LLM personalization uses Claude API when available.
+Exact code from notebook Cells 82 and 84 (clean model, no leakage).
 """
 
 import numpy as np
@@ -11,10 +8,7 @@ from state import ChurnState
 
 
 def retention_strategy(row: dict) -> str:
-    """
-    Exact code from notebook Cell 82.
-    Input is a dict with 'Risk Tier', 'Contract', 'Monthly Charge' keys.
-    """
+    """Exact code from notebook Cell 82 (clean model)."""
     if row["Risk Tier"] == "HIGH":
         contract = row.get("Contract", "Unknown")
         charge = row.get("Monthly Charge", 0)
@@ -35,41 +29,12 @@ def retention_strategy(row: dict) -> str:
 
 
 def generate_retention_message(risk_profile: dict, use_llm=False, client=None) -> str:
-    """
-    Exact code from notebook Cell 84.
-    risk_profile has: churn_probability, risk_tier, top_risk_drivers, protective_factors
-    top_risk_drivers is list of (name, shap_val, feat_val) tuples.
-    """
+    """Exact template fallback from notebook Cell 84."""
     prob = risk_profile["churn_probability"]
     tier = risk_profile["risk_tier"]
     drivers = risk_profile["top_risk_drivers"]
 
-    if use_llm and client:
-        driver_lines = []
-        for name, shap_val, feat_val in drivers[:3]:
-            if isinstance(feat_val, (int, float, np.integer, np.floating)):
-                driver_lines.append(f"- {name} (value: {feat_val:.2f}, impact: +{shap_val:.3f})")
-            else:
-                driver_lines.append(f"- {name} (value: {feat_val}, impact: +{shap_val:.3f})")
-
-        prompt = (
-            f"You are a customer retention specialist at a telecom company. "
-            f"A customer has a {prob:.0%} churn probability (tier: {tier}). "
-            f"Top risk drivers: {chr(10).join(driver_lines)}. "
-            f"Write a personalized 3-4 sentence retention message that addresses "
-            f"their top risk driver with a specific offer."
-        )
-        try:
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=200, temperature=0.7
-            )
-            return response.choices[0].message.content.strip()
-        except Exception:
-            pass  # Fall through to template
-
-    # Template fallback — exact code from notebook Cell 84
+    # Template fallback
     top_driver = drivers[0][0] if drivers else "general factors"
     top_magnitude = abs(drivers[0][1]) if drivers else 0
 
@@ -89,11 +54,10 @@ def generate_retention_message(risk_profile: dict, use_llm=False, client=None) -
 
 
 def solution_agent(state: ChurnState) -> dict:
-    """Generate a personalized retention offer using rule-based baseline + Claude."""
+    """Generate a personalized retention offer."""
     profile = state["customer_profile"]
     risk_data = state["risk_data"]
 
-    # Build row dict for retention_strategy (matches notebook Cell 82 interface)
     strategy_row = {
         "Risk Tier": risk_data["risk_tier"],
         "Contract": profile.get("contract", "Unknown"),
@@ -101,7 +65,6 @@ def solution_agent(state: ChurnState) -> dict:
     }
     baseline = retention_strategy(strategy_row)
 
-    # Build risk_profile for generate_retention_message (matches Cell 84 interface)
     risk_profile = {
         "churn_probability": risk_data["churn_probability"],
         "risk_tier": risk_data["risk_tier"],
@@ -109,9 +72,8 @@ def solution_agent(state: ChurnState) -> dict:
             (d["feature"], d["shap_value"], d["feature_value"])
             for d in risk_data.get("top_drivers", [])
         ],
-        "protective_factors": [],
     }
-    message = generate_retention_message(risk_profile, use_llm=False)
+    message = generate_retention_message(risk_profile)
 
     return {
         "baseline_strategy": baseline,
