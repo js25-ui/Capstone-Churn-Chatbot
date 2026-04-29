@@ -258,8 +258,11 @@ def agent3_respond(state, user_msg):
             # Check if they rejected
             is_reject = any(w in user_msg.lower() for w in
                            ["no", "not enough", "nah", "pass", "nope", "won't work",
-                            "not interested", "don't want", "too little", "not good"])
-            if is_reject and len(offers) < 2:
+                            "not interested", "don't want", "too little", "not good",
+                            "something else", "anything else", "different",
+                            "not what i", "not for me", "dont want", "i dont",
+                            "no thanks", "no thank", "not that"])
+            if is_reject:
                 return {"response": response, "action": "Offer rejected — follow-up",
                         "offer_made": False, "is_rejection": True}
             return {"response": response, "action": "Post-offer conversation", "offer_made": False}
@@ -334,7 +337,10 @@ def _respond_fallback(state, msg, should_offer, sentiment, complaint, offers):
             return {"response": f"Wonderful{addr}! I've applied the changes to your account. "
                     f"You'll see the updated rate on your next bill. Anything else I can help with?",
                     "action": "Offer accepted", "offer_made": False}
-        if any(w in low for w in ["no", "not enough", "nah", "pass", "nope", "won't work"]):
+        if any(w in low for w in ["no", "not enough", "nah", "pass", "nope", "won't work",
+                                    "something else", "anything else", "different",
+                                    "not what i", "not for me", "dont want", "i dont",
+                                    "no thanks", "no thank", "not that"]):
             return {"response": f"I understand{addr}. What would work better for you? "
                     f"I want to find something that actually fits.",
                     "action": "Offer rejected", "offer_made": False, "is_rejection": True}
